@@ -8,14 +8,13 @@ import org.openqa.selenium.WebElement;
 import org.openqa.selenium.chrome.ChromeDriver;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
+import java.io.IOException;
+import java.util.*;
 import java.util.stream.Collectors;
 
 public class Report {
-    private static WebDriver driver;
 
     private static int rowNumber = 0;
     private static final int dateColumn = 0;
@@ -26,18 +25,34 @@ public class Report {
     private static final int tradePriceColumn = 5;
     private static final int totalPriceColumn = 6;
 
-    private static File file;
-    private static XSSFWorkbook wb;
     private static XSSFSheet sh;
 
     public static void main(String[] args) throws Exception {
         System.out.println("Report open");
         System.setProperty("webdriver.chrome.driver", "path/to/chromedriver");
-        driver = new ChromeDriver();
+        WebDriver driver = new ChromeDriver();
         driver.get("http://localhost:3000/");
 
-        file = new File("path/to/output.xlsx");
-        wb = new XSSFWorkbook();
+        Map<String, String> brandNameMap = new HashMap<>();
+        Map<String, String> brandCodeMap = new HashMap<>();
+
+        try {
+            File file = new File("path/to/lookup.xlsx");
+            FileInputStream fis = new FileInputStream(file);
+            XSSFWorkbook wb = new XSSFWorkbook(fis);
+            XSSFSheet sheet1 = wb.getSheetAt(0);
+            int row = 0;
+            while (!sheet1.getRow(row).getCell(0).getStringCellValue().equals("")) {
+                brandNameMap.put(sheet1.getRow(row).getCell(0).getStringCellValue(), sheet1.getRow(row).getCell(1).getStringCellValue());
+                brandCodeMap.put(sheet1.getRow(row).getCell(1).getStringCellValue(), sheet1.getRow(row).getCell(0).getStringCellValue());
+                row++;
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        File file = new File("path/to/output.xlsx");
+        XSSFWorkbook wb = new XSSFWorkbook();
         sh = wb.createSheet();
 
         sh.createRow(rowNumber).createCell(dateColumn).setCellValue("Date");
@@ -80,10 +95,10 @@ public class Report {
                 // option assignment
                 if (leftTopSectionText.contains("Assignment")) {
                     String getBrandCode = leftTopSectionSplits.get(0).trim();
-                    String getTradeType = leftTopSectionSplits.get(leftTopSectionSplits.size() - 1).trim();
+                    String getBrandName = brandCodeMap.get(getBrandCode);
                     String optionTradePrice = leftTopSectionSplits.get(1).trim().replace("$", "").replace(",", "");
                     double getOptionTradePrice = Double.parseDouble(optionTradePrice);
-                    optionAssignment(getTotalPrice, getDate, getBrandCode, getOptionTradePrice);
+                    optionAssignment(getTotalPrice, getDate, getBrandCode, getOptionTradePrice, getBrandName);
                 }
                 // dividend
                 else if (leftTopSectionText.contains("Dividend")) {
@@ -98,11 +113,12 @@ public class Report {
                     String rightBottomSection = rightBottomSectionLocator.getText();
                     List<String> rightBottomSectionSplits = new ArrayList<>(Arrays.asList(rightBottomSection.split(" ")));
                     String getBrandCode = leftTopSectionSplits.get(0).trim();
+                    String getBrandName = brandCodeMap.get(getBrandCode);
                     String getTradeType = leftTopSectionSplits.get(leftTopSectionSplits.size() - 1).trim();
                     double getCount = Double.parseDouble(rightBottomSectionSplits.get(0));
                     String tradePrice = rightBottomSectionSplits.get(rightBottomSectionSplits.size() - 1).replace("$", "").replace(",", "");
                     double getTradePrice = Double.parseDouble(tradePrice);
-                    contracts(getTradeType, getTotalPrice, getDate, getBrandCode, getCount, getTradePrice);
+                    contracts(getTradeType, getTotalPrice, getDate, getBrandCode, getCount, getTradePrice, getBrandName);
                 }
                 // shares
                 else if (leftTopSectionText.contains("Market") || leftTopSectionText.contains("Limit")) {
@@ -113,11 +129,12 @@ public class Report {
                     leftTopSectionSplits.remove(leftTopSectionSplits.size() - 1);
                     leftTopSectionSplits.remove(leftTopSectionSplits.size() - 1);
                     String getBrandName = leftTopSectionSplits.stream().map(String::valueOf).collect(Collectors.joining(" ", "", ""));
+                    String getBrandCode = brandNameMap.get(getBrandName);
                     String count = rightBottomSectionSplits.get(0).replace(",", "");
                     double getCount = Double.parseDouble(count);
                     String tradePrice = rightBottomSectionSplits.get(rightBottomSectionSplits.size() - 1).replace("$", "").replace(",", "");
                     double getTradePrice = Double.parseDouble(tradePrice);
-                    shares(getTradeType, getTotalPrice, getDate, getBrandName, getCount, getTradePrice);
+                    shares(getTradeType, getTotalPrice, getDate, getBrandName, getCount, getTradePrice, getBrandCode);
                 }
 //                // transfers
 //                else if (leftTopSectionText.contains("Deposit") || leftTopSectionText.contains("Withdrawal")) {
@@ -143,30 +160,33 @@ public class Report {
         System.out.println("Report close");
     }
 
-    private static void optionAssignment(double getTotalPrice, String getDate, String  getBrandCode, double getOptionTradePrice) {
+    private static void optionAssignment(double getTotalPrice, String getDate, String  getBrandCode, double getOptionTradePrice, String getBrandName) {
         String tradeType = (getTotalPrice > 0.0) ? "Sell" : "Buy";
         sh.createRow(rowNumber).createCell(dateColumn).setCellValue(getDate);
         sh.getRow(rowNumber).createCell(brandCodeColumn).setCellValue(getBrandCode);
+        sh.getRow(rowNumber).createCell(brandNameColumn).setCellValue(getBrandName);
         sh.getRow(rowNumber).createCell(tradeTypeColumn).setCellValue(tradeType);
         sh.getRow(rowNumber).createCell(countColumn).setCellValue(Math.abs(Math.ceil(getTotalPrice / getOptionTradePrice)));
         sh.getRow(rowNumber).createCell(tradePriceColumn).setCellValue(getOptionTradePrice);
         sh.getRow(rowNumber++).createCell(totalPriceColumn).setCellValue(Math.ceil(getTotalPrice));
     }
 
-    private static void contracts(String getTradeType, double getTotalPrice, String getDate, String getBrandCode, double getCount, double getTradePrice) {
+    private static void contracts(String getTradeType, double getTotalPrice, String getDate, String getBrandCode, double getCount, double getTradePrice, String getBrandName) {
         double totalPrice = getTradeType.equals("Buy") ? getTotalPrice * -1 : getTotalPrice;
         sh.createRow(rowNumber).createCell(dateColumn).setCellValue(getDate);
         sh.getRow(rowNumber).createCell(brandCodeColumn).setCellValue(getBrandCode);
+        sh.getRow(rowNumber).createCell(brandNameColumn).setCellValue(getBrandName);
         sh.getRow(rowNumber).createCell(tradeTypeColumn).setCellValue(getTradeType);
         sh.getRow(rowNumber).createCell(countColumn).setCellValue(getCount * 100);
         sh.getRow(rowNumber).createCell(tradePriceColumn).setCellValue(getTradePrice);
         sh.getRow(rowNumber++).createCell(totalPriceColumn).setCellValue(totalPrice);
     }
 
-    private static void shares(String getTradeType, double getTotalPrice, String getDate, String getBrandName, double getCount, double getTradePrice) {
+    private static void shares(String getTradeType, double getTotalPrice, String getDate, String getBrandName, double getCount, double getTradePrice, String getBrandCode) {
         double totalPrice = getTradeType.equals("Buy") ? getTotalPrice * -1 : getTotalPrice;
         sh.createRow(rowNumber).createCell(dateColumn).setCellValue(getDate);
         sh.getRow(rowNumber).createCell(brandNameColumn).setCellValue(getBrandName);
+        sh.getRow(rowNumber).createCell(brandCodeColumn).setCellValue(getBrandCode);
         sh.getRow(rowNumber).createCell(tradeTypeColumn).setCellValue(getTradeType);
         sh.getRow(rowNumber).createCell(countColumn).setCellValue(getCount);
         sh.getRow(rowNumber).createCell(tradePriceColumn).setCellValue(getTradePrice);
